@@ -66,6 +66,23 @@ phải dùng `create` thay vì `apply` ở lần đầu: xem README của repo B
 
 ### 2. Secret pull image từ GHCR
 
+Nếu đã tạo khi deploy BE vào cùng namespace thì **không cần làm lại** — BE và FE
+dùng chung một `ghcr-cred`.
+
+Chưa có thì copy lại secret của zeromon (cùng org `zerocompany-org`, khỏi tạo PAT
+mới):
+
+```bash
+kubectl -n zeromon get secret ghcr-cred -o json | python -c "
+import sys,json
+d=json.load(sys.stdin)
+print(json.dumps({'apiVersion':'v1','kind':'Secret','type':d['type'],
+                  'metadata':{'name':'ghcr-cred'},'data':d['data']}))
+" | kubectl -n paytrack create -f -
+```
+
+Hoặc tạo PAT riêng (classic, scope `read:packages`):
+
 ```bash
 kubectl -n paytrack create secret docker-registry ghcr-cred \
   --docker-server=ghcr.io \
@@ -73,7 +90,7 @@ kubectl -n paytrack create secret docker-registry ghcr-cred \
   --docker-password=<PAT co read:packages>
 ```
 
-Nếu đã tạo khi deploy BE vào cùng namespace thì **không cần làm lại**.
+Chi tiết xem README của repo BE.
 
 ### 3. GitHub Actions Variable (làm ở repo, không phải trên cụm)
 
@@ -154,5 +171,5 @@ Lệnh hay dùng:
 kubectl -n paytrack get pod -l app=paytrack-fe
 kubectl -n paytrack logs -l app=paytrack-fe --tail=100 -f
 kubectl -n paytrack exec -it deploy/paytrack-fe -- cat /etc/nginx/conf.d/default.conf
-kubectl -n paytrack exec -it deploy/paytrack-fe -- wget -qO- localhost:8080/health
+kubectl -n paytrack exec -it deploy/paytrack-fe -- wget -qO- 127.0.0.1:8080/health
 ```

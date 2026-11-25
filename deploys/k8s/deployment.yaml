@@ -5,9 +5,12 @@ metadata:
   labels:
     app: paytrack-fe
 spec:
-  # SPA tĩnh, không state -> scale ngang thoải mái. 2 replica để rollout và sự cố
-  # node không làm đứt trang.
-  replicas: 2
+  # SPA tĩnh, không state -> scale ngang thoải mái, nhưng để 1 replica cho gọn.
+  # Rollout vẫn không đứt trang: maxSurge 1 + maxUnavailable 0 nên pod mới Ready
+  # xong mới xoá pod cũ. Đánh đổi duy nhất: node đang chạy pod mà chết thì trang
+  # tắt vài chục giây tới khi K8s xếp lại pod sang node khác. Muốn chịu được sự
+  # cố node thì đổi lại 2.
+  replicas: 1
 
   strategy:
     type: RollingUpdate
