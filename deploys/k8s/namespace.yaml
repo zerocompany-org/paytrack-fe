@@ -1,0 +1,33 @@
+# Namespace dùng CHUNG cho API (BE) và web (FE).
+#
+# Cố ý KHÔNG đưa vào kustomization.yaml (resources): namespace là tài nguyên chia
+# sẻ giữa hai service. Nếu để kustomize "sở hữu" nó thì `kubectl delete -k .` của
+# MỘT service sẽ xoá luôn namespace và kéo theo service kia cùng mọi
+# Secret/ConfigMap trong đó. Vì vậy apply riêng, một lần:
+#
+#     kubectl apply -f namespace.yaml
+#
+# (File này giống hệt bản ở repo paytrack-be: deploys/k8s/namespace.yaml — apply cái
+#  nào cũng được, thao tác idempotent.)
+#
+# Hệ chỉ có MỘT môi trường: nhánh `prod` -> image -> namespace `paytrack`. Muốn
+# thêm staging sau này thì copy cả thư mục deploys/k8s/ thành deploys/k8s/stg/,
+# đổi namespace + domain + tên image, và thêm nhánh `staging` vào workflow.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: paytrack
+  # Gán namespace vào Rancher Project "ZeroR&D-Common" (id p-tbjsn, cluster local)
+  # ngay lúc tạo, thay vì vào UI Rancher kéo namespace vào project sau.
+  #
+  # Rancher đọc ANNOTATION `<cluster>:<projectId>`; LABEL (chỉ projectId, không có
+  # tiền tố cluster) là thứ Rancher tự thêm và dùng cho selector — khai sẵn cả hai
+  # để namespace hiện đúng trong project ngay từ đầu.
+  #
+  # Project này `resourceQuota.limit` rỗng nên KHÔNG cần annotation
+  # `field.cattle.io/resourceQuota`. Nếu sau này project được đặt quota thì
+  # namespace phải khai phần quota của mình, không thì Rancher từ chối.
+  annotations:
+    field.cattle.io/projectId: "local:p-tbjsn"
+  labels:
+    field.cattle.io/projectId: "p-tbjsn"

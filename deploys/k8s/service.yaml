@@ -1,0 +1,18 @@
+# Service ClusterIP — Traefik trong cụm route tới đây qua IngressRoute. Không mở
+# NodePort: traffic vào cụm qua đúng một cổng chung của Traefik cụm, rồi Traefik
+# phân luồng theo Host().
+apiVersion: v1
+kind: Service
+metadata:
+  name: paytrack-fe
+  labels:
+    app: paytrack-fe
+spec:
+  type: ClusterIP
+  selector:
+    app: paytrack-fe
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      protocol: TCP

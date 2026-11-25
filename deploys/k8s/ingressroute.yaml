@@ -1,0 +1,26 @@
+# IngressRoute (CRD của Traefik) — KHÔNG dùng Ingress chuẩn của Kubernetes.
+#
+# TLS terminate ở Traefik VPS (NGOÀI cụm), forward HTTP thuần vào NodePort của
+# Traefik k8s -> router ở đây nghe entrypoint "web", KHÔNG phải "websecure", và
+# không khai mục "tls".
+#
+# Kiểm tên entrypoint / NodePort thực tế của Traefik cụm:
+#   kubectl get svc -n kube-system traefik -o yaml | grep -A4 nodePort
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: paytrack-fe
+  labels:
+    app: paytrack-fe
+spec:
+  entryPoints:
+    - web
+  routes:
+    # PRODUCTION: domain web thật. Phải khớp bản ghi DNS
+    # trỏ về Traefik VPS, và khớp `clientAddr` trong secret.yaml của BE production
+    # (giá trị đó được nhúng vào link trong email thông báo).
+    - match: Host(`paytrack.zerornd.com`)
+      kind: Rule
+      services:
+        - name: paytrack-fe
+          port: 8080

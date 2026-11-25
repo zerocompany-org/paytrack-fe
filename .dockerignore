@@ -21,3 +21,6 @@ coverage
 *.swo
 *~
 .claude
+# Manifest k8s + CI: không liên quan tới build image, loại ra cho context nhẹ
+deploys
+.github

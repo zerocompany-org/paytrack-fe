@@ -1,0 +1,98 @@
+name: Build & Push FE image (GHCR)
+
+# Hệ chỉ có MỘT môi trường: merge `main` -> `prod`, push nhánh `prod` là CI build
+# và đẩy image lên GHCR.
+#
+#   push nhánh `prod` -> ghcr.io/zerocompany-org/paytrack-fe/fe:{latest, sha-<short>}
+#
+# KHÁC repo BE: FE bake cấu hình vào bundle lúc build. Dockerfile nhận ARG
+# BASE_URL rồi ghi ra .env trước khi `yarn build`; quasar.config.js nạp .env qua
+# dotenv vào `build.env`, webpack thay process.env.BASE_URL thành hằng số trong
+# src/boot/axios.js. Vì vậy image gắn chặt với domain API — đổi domain là phải
+# build lại image, không sửa được bằng ConfigMap.
+#
+# Giá trị lấy từ GitHub Actions Variable (Settings > Secrets and variables >
+# Actions > Variables), KHÔNG hard-code trong workflow:
+#   BASE_URL = https://api-paytrack.zerornd.com/api      (nhớ hậu tố /api)
+# Phải khớp Host() trong ingressroute.yaml của repo BE.
+on:
+  push:
+    branches: [prod]
+  workflow_dispatch: {}
+
+concurrency:
+  group: build-fe-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Quên khai Variable thì Dockerfile rơi về default http://localhost:6789/api
+      # và image build ra trỏ vào localhost — trang chạy được nhưng mọi request
+      # API đều hỏng. Dừng sớm ở đây rõ ràng hơn là debug trên cụm.
+      - name: Kiểm tra BASE_URL
+        run: |
+          if [ -z "${{ vars.BASE_URL }}" ]; then
+            echo "Thiếu GitHub Actions Variable BASE_URL (vd https://api-paytrack.zerornd.com/api)."
+            exit 1
+          fi
+          echo "BASE_URL = ${{ vars.BASE_URL }}"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Docker metadata (tags & labels)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}/fe
+          tags: |
+            type=raw,value=latest
+            type=sha,format=short
+
+      - name: Build & push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=fe
+          cache-to: type=gha,mode=max,scope=fe
+          # BẮT BUỘC tắt: job `cleanup` chỉ giữ 3 version. Bật provenance/sbom thì
+          # mỗi build đẩy thêm manifest con, GHCR đếm là version -> cleanup xoá
+          # nhầm manifest con của chính image vừa push, image không pull được.
+          provenance: false
+          sbom: false
+          build-args: |
+            BASE_URL=${{ vars.BASE_URL }}
+
+  cleanup:
+    name: Dọn version cũ trên GHCR
+    needs: build-push
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      packages: write
+    steps:
+      - name: Chỉ giữ lại 3 version gần nhất
+        uses: actions/delete-package-versions@v5
+        with:
+          owner: ${{ github.repository_owner }}
+          package-name: ${{ github.event.repository.name }}/fe
+          package-type: container
+          min-versions-to-keep: 3

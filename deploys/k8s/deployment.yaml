@@ -1,0 +1,142 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: paytrack-fe
+  labels:
+    app: paytrack-fe
+spec:
+  # SPA tĩnh, không state -> scale ngang thoải mái. 2 replica để rollout và sự cố
+  # node không làm đứt trang.
+  replicas: 2
+
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+
+  selector:
+    matchLabels:
+      app: paytrack-fe
+
+  template:
+    metadata:
+      labels:
+        app: paytrack-fe
+      annotations:
+        # Đổi nội dung ConfigMap nginx KHÔNG tự làm pod restart. Annotation này chỉ
+        # để nhắc: sau khi sửa nginx-config.yaml phải
+        #   kubectl -n paytrack rollout restart deployment/paytrack-fe
+        configmap.reload/hint: "sua nginx-config.yaml xong phai rollout restart"
+    spec:
+      terminationGracePeriodSeconds: 30
+
+      # GHCR để package private mặc định -> cần secret `ghcr-cred` để pull. Đổi
+      # package sang public thì bỏ được khối này. Xem deploys/k8s/README.md.
+      imagePullSecrets:
+        - name: ghcr-cred
+
+      securityContext:
+        runAsNonRoot: true
+        # uid/gid của user `nginx` có sẵn trong image nginx:alpine.
+        runAsUser: 101
+        runAsGroup: 101
+        # fsGroup BẮT BUỘC: kubelet dựa vào nó để gán group + quyền ghi cho 2
+        # emptyDir bên dưới. Bỏ dòng này thì emptyDir thuộc root:root 0755, nginx
+        # (uid 101) không mkdir được và pod chết ngay:
+        #   [emerg] mkdir() "/var/cache/nginx/client_temp" failed (13: Permission denied)
+        fsGroup: 101
+        seccompProfile:
+          type: RuntimeDefault
+
+      containers:
+        - name: paytrack-fe
+          # PRODUCTION dùng package `fe` (build-fe.yml đẩy khi push nhánh
+          # `prod`). Tag: latest, sha-<commit>. `:latest` chỉ cho lần apply
+          # đầu; deploy chuẩn dùng tag sha-* cố định qua deploy.sh.
+          #
+          # LƯU Ý: BASE_URL được bake vào bundle lúc build, nên image gắn chặt
+          # với domain API. Đổi domain API = build lại image, không phải sửa
+          # ConfigMap rồi restart.
+          image: ghcr.io/zerocompany-org/paytrack-fe/fe:latest
+          imagePullPolicy: IfNotPresent
+
+          ports:
+            - name: http
+              # Khớp `listen 8080` trong ConfigMap nginx. Không dùng 80: pod chạy
+              # non-root nên không bind được cổng đặc quyền.
+              containerPort: 8080
+
+          # KHÔNG có envFrom/env cấu hình: src/boot/axios.js đọc process.env.BASE_URL
+          # mà webpack đã thay bằng hằng số lúc build. Đổi endpoint API = build lại
+          # image, không phải sửa ConfigMap.
+
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+
+          volumeMounts:
+            # Server block. subPath để chỉ thêm 1 file vào conf.d, không đè cả thư mục.
+            - name: nginx-conf
+              mountPath: /etc/nginx/conf.d/default.conf
+              subPath: default.conf
+              readOnly: true
+            # nginx ghi proxy/fastcgi/client-body temp vào /var/cache/nginx và
+            # pid vào /var/run. rootfs read-only nên thiếu 2 volume này nginx
+            # chết ngay lúc start.
+            - name: cache
+              mountPath: /var/cache/nginx
+            - name: run
+              mountPath: /var/run
+
+          # /health là location trả 200 tĩnh trong ConfigMap nginx — không phụ
+          # thuộc API. API sập thì trang vẫn Ready và hiện lỗi tử tế phía client,
+          # đúng ý muốn (FE sập theo API chỉ làm mất luôn trang báo lỗi).
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 2
+            failureThreshold: 15
+
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 3
+
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 2
+
+          lifecycle:
+            preStop:
+              exec:
+                # Chờ kube-proxy gỡ pod khỏi Endpoints trước khi nginx nhận SIGTERM.
+                command: ["/bin/sh", "-c", "sleep 5"]
+
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 128Mi
+
+      volumes:
+        - name: nginx-conf
+          configMap:
+            name: paytrack-fe-nginx
+        - name: cache
+          emptyDir:
+            sizeLimit: 128Mi
+        - name: run
+          emptyDir:
+            sizeLimit: 8Mi

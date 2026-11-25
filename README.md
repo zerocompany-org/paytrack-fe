@@ -101,6 +101,29 @@ Note: `BASE_URL` is embedded at build time from `.env`. To change the endpoint a
 
 ## Production Deployment
 
+### Option 0: Kubernetes (GHCR + Traefik)
+
+Manifests live in [`deploys/k8s`](deploys/k8s). Merging `main` into the `prod` branch
+triggers [`.github/workflows/build-fe.yml`](.github/workflows/build-fe.yml), which builds
+and pushes `ghcr.io/zerocompany-org/paytrack-fe/fe` (tags `latest` + `sha-<short>`).
+
+```bash
+cd deploys/k8s
+kubectl apply -f namespace.yaml
+kubectl apply -k .                   # no file to fill in: nothing is gitignored here
+./deploy.sh sha-<commit>             # subsequent deploys
+```
+
+Two things to know before deploying — both covered in
+[`deploys/k8s/README.md`](deploys/k8s/README.md):
+
+- `BASE_URL` is **baked into the bundle at build time**, so the image is tied to the API
+  domain. Set the GitHub Actions Variable `BASE_URL` (e.g. `https://api-paytrack.zerornd.com/api`);
+  the workflow fails fast if it is missing.
+- The image ships **without** an nginx server block (the Dockerfile deletes the default
+  one and copies nothing back). The ConfigMap `paytrack-fe-nginx` supplies it, with
+  `listen 8080` so the pod can run as non-root.
+
 ### Option A: Docker Compose (recommended, fast)
 
 1) Prepare a `.env` (next to `docker-compose.yml`):

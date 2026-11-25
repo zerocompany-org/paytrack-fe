@@ -1,0 +1,29 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# PRODUCTION: cùng namespace `paytrack` với API production. Namespace khai ở
+# namespace.yaml, apply RIÊNG (`kubectl apply -f namespace.yaml`), KHÔNG nằm
+# trong resources — xem lý do trong namespace.yaml.
+namespace: paytrack
+
+resources:
+  # Khác repo BE: FE KHÔNG có file nào bị .gitignore. Cấu hình API (BASE_URL)
+  # bake vào bundle lúc build, nginx-config.yaml thì giống nhau ở mọi cụm nên
+  # commit thẳng. `kubectl apply -k .` chạy được ngay sau khi clone.
+  - nginx-config.yaml
+  - deployment.yaml
+  - service.yaml
+  - ingressroute.yaml
+
+# `commonLabels` đã deprecated. Dùng `labels` và KHÔNG bật includeSelectors:
+# selector của Deployment/Service là bất biến sau khi tạo.
+labels:
+  - pairs:
+      app: paytrack-fe
+      # Gom BE + FE lại để truy vấn chung, giống zauto/zeromon:
+      #   kubectl -n paytrack get all -l app.kubernetes.io/part-of=paytrack
+      app.kubernetes.io/part-of: paytrack
+    includeSelectors: false
+
+# Không dùng configMapGenerator: generator gắn hậu tố hash vào tên ConfigMap, mà
+# deployment.yaml tham chiếu tên cố định `paytrack-fe-nginx`.

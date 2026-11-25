@@ -1,0 +1,9 @@
+# Cùng nguyên tắc với .env: cấu hình của MỘT nơi triển khai thì không commit.
+#
+# Hiện FE KHÔNG có file nào thuộc diện này: cấu hình API (BASE_URL) được bake vào
+# bundle lúc build (xem .github/workflows/build-fe.yml), còn nginx-config.yaml là
+# cấu hình web server giống nhau ở mọi cụm nên vẫn commit.
+#
+# Giữ sẵn pattern cho tương lai (nếu sau này FE cần cấu hình runtime).
+configmap.yaml
+secret.yaml

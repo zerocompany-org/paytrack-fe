@@ -1,0 +1,74 @@
+# Cấu hình nginx cho pod FE.
+#
+# BẮT BUỘC PHẢI CÓ: Dockerfile xoá /etc/nginx/conf.d/default.conf của image gốc
+# (`RUN rm /etc/nginx/conf.d/default.conf`) mà KHÔNG copy file nào vào thay. Image
+# tự nó không có server block nào — docker-compose bù bằng cách mount nginx.conf
+# từ máy host, trên k8s thì ConfigMap này đóng vai trò đó.
+#
+# Nội dung bám sát nginx.conf ở gốc repo, chỉ khác 2 điểm cho môi trường k8s:
+#   1. listen 8080 thay vì 80 — pod chạy non-root (uid 101), cổng < 1024 cần
+#      capability NET_BIND_SERVICE mà securityContext đã drop ALL.
+#   2. error_log mức `warn` thay vì `debug` — mức debug ghi mỗi request vài chục
+#      dòng vào stderr, đẩy chi phí log của cụm lên vô ích.
+#
+# KHÔNG có secret ở đây và nội dung giống nhau ở mọi môi trường -> file này ĐƯỢC
+# commit (khác với secret.yaml bên repo BE).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: paytrack-fe-nginx
+  labels:
+    app: paytrack-fe
+data:
+  default.conf: |
+    server {
+        listen 8080;
+        server_name _;
+        root /usr/share/nginx/html;
+        index index.html;
+
+        # /var/log/nginx/{access,error}.log trong image gốc là symlink tới
+        # /dev/stdout và /dev/stderr -> log chảy thẳng ra `kubectl logs`, không
+        # cần volume dù rootfs read-only.
+        error_log  /var/log/nginx/error.log warn;
+        access_log /var/log/nginx/access.log;
+
+        # Gzip
+        gzip on;
+        gzip_static on;
+        gzip_types text/plain text/css text/javascript application/javascript application/json application/x-javascript text/xml application/xml application/xml+rss;
+        gzip_proxied any;
+        gzip_vary on;
+        gzip_comp_level 6;
+        gzip_buffers 16 8k;
+        gzip_http_version 1.1;
+
+        # Security headers
+        add_header X-Frame-Options "SAMEORIGIN" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header X-XSS-Protection "1; mode=block" always;
+        add_header Referrer-Policy "no-referrer-when-downgrade" always;
+        add_header Content-Security-Policy "default-src 'self' http: https: data: blob: 'unsafe-inline' 'unsafe-eval'" always;
+
+        # Static assets: bundle Quasar có hash trong tên file nên cache 1 năm là an toàn.
+        location ~* \.(jpg|jpeg|png|gif|ico|css|js|woff|woff2|ttf|svg)$ {
+            expires 1y;
+            add_header Cache-Control "public, immutable";
+        }
+
+        # Endpoint cho probe của k8s. access_log off để probe mỗi 10-20s không
+        # làm nhiễu log.
+        location /health {
+            access_log off;
+            return 200 "healthy\n";
+            add_header Content-Type text/plain;
+        }
+
+        # SPA fallback: vue-router dùng history mode, mọi path không phải file
+        # tĩnh đều trả index.html để router phía client xử lý.
+        location / {
+            try_files $uri $uri/ /index.html;
+        }
+
+        error_page 404 /index.html;
+    }
